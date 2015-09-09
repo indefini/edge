@@ -1,0 +1,21 @@
+[package]
+name = "edge"
+version = "0.1.0"
+#authors = ["noone"]
+
+links = "edge"
+build = "build.rs"
+
+[lib]
+name = "module"
+# this could be "staticlib" as well
+crate-type = ["dylib"]
+
+[dependencies]
+#libc = "0.1"
+libc = "*"
+
+[build-dependencies]
+pkg-config = "0.3"
+gcc = "0.3"
+
