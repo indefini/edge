@@ -1,6 +1,20 @@
 #include "e_mod_edge.h"
 #define __UNUSED__
 
+enum {
+	STATE_HIDDEN,
+	STATE_AWOKEN_FROM_HIDDEN,
+	STATE_AWOKEN_FROM_OPENED,
+	STATE_MOVING,
+	STATE_OPENED,
+};
+
+enum {
+	DIR_NO,
+	DIR_LEFT,
+	DIR_RIGHT
+};
+
 typedef struct _Edge Edge;
 
 struct _Edge
@@ -8,9 +22,12 @@ struct _Edge
 	Evas_Object* r;
 	E_Zone* zone;
 	Eina_Bool down;
-	Eina_Bool started;
-	Eina_Bool ignore;
 	int start;
+	int last;
+	int current;
+	int state;
+	int dir;
+	int offset;
 };
 
 static Edge* edge_new()
@@ -38,38 +55,81 @@ static Eina_Bool
 _e_winlist_cb_mouse_down(void *data, int type __UNUSED__, void *event)
 {
 	Edge* edge = data;
-   Ecore_Event_Mouse_Button *ev;
+   Ecore_Event_Mouse_Button *ev = event;;
 
-   ev = event;
    if (ev->buttons == 1) {
    		printf("mouse down  %d, %d \n", ev->x, ev->y);
    		printf("zone stuff  %d \n", edge->zone->w);
-		int margin = 5;
-	if (ev->x >= edge->zone->w - margin) {
-   		printf("!!!!edge mouse down  %d, %d \n", ev->x, ev->y);
-		edge->down = true;
-		edge->start = ev->x;
-	}
+		if (edge->state == STATE_HIDDEN) {
+			int margin = 5;
+			if (ev->x >= edge->zone->w - margin) {
+   				printf("!!!!edge mouse down  %d, %d \n", ev->x, ev->y);
+				edge->down = true;
+				edge->start = ev->x;
+				edge->last = ev->x;
+				edge->current = ev->x;
+				edge->state = STATE_AWOKEN_FROM_HIDDEN;
+				edge->offset = 0;
+			}
+		}
    }
 
    return ECORE_CALLBACK_PASS_ON;
+}
+
+void _open(Edge* edge)
+{
+	edge->state = STATE_OPENED;
+	int x, y, w, h;
+	evas_object_geometry_get(edge->r, &x, &y, &w, &h);
+	evas_object_move(edge->r, edge->zone->w - w, 0);
+}
+
+void _close(Edge* edge)
+{
+	edge->state = STATE_HIDDEN;;
+	evas_object_move(edge->r, edge->zone->w, 0);
 }
 
 static Eina_Bool
 _e_winlist_cb_mouse_up(void *data __UNUSED__, int type __UNUSED__, void *event)
 {
 	Edge* edge = data;
-   Ecore_Event_Mouse_Button *ev;
+   Ecore_Event_Mouse_Button *ev = event;
+   				printf("mouse up : ev.x : %d, last : %d, dir : %d\n",
+						ev->x,
+						edge->last,
+						edge->dir
+						);
 
-   ev = event;
    if (ev->buttons == 1) {
-	   if (edge->down) {
-   		printf("edge mouse up  %d, %d \n", ev->x, ev->y);
+	   if (edge->state == STATE_MOVING) {
+		   if (ev->x < edge->last) {
+			   _open(edge);
+			}
+		    else if (ev->x > edge->last) {
+				_close(edge);
+			}
+		   else if (edge->dir == DIR_LEFT) {
+			   _open(edge);
+		   }
+		   else if (edge->dir == DIR_RIGHT) {
+			   _close(edge);
+		   }
+		   else {
+   				printf("mouse up, dont know what to do \n");
+		   }
 	   }
-	edge->down = false;
-	edge->started = false;
-	edge->ignore = false;
-	evas_object_move(edge->r, edge->zone->w, 0);
+	   else if (edge->state == STATE_AWOKEN_FROM_HIDDEN) {
+		   edge->state = STATE_HIDDEN;
+	   }
+	   else if (edge->state == STATE_AWOKEN_FROM_OPENED) {
+		   edge->state = STATE_OPENED;
+	   }
+	   else {
+   				printf("mouse up, wrong state : %d \n", edge->state);
+	   }
+	   edge->down = false;
    }
 
    return ECORE_CALLBACK_PASS_ON;
@@ -80,38 +140,75 @@ static Eina_Bool
 _e_winlist_cb_mouse_move(void *data __UNUSED__, int type __UNUSED__, void *event)
 {
 	Edge* edge = data;
+	if (!edge->down) return ECORE_CALLBACK_PASS_ON;
+
 	int x, y, w, h;
 	evas_object_geometry_get(edge->r, &x, &y, &w, &h);
 
 
    Ecore_Event_Mouse_Move *ev = event;
-   if (edge->down && !edge->ignore ) {
-	   if (edge->started) {
-		   int nx = ev->x;
-		   if (edge->zone->w - nx > w) {
-			   nx = edge->zone->w - w;
-		   }
-		   evas_object_move(edge->r, nx, 0);
-	   }
-	   else {
-   			//printf("edge mouse event %d, %d \n", ev->x, ev->y);
-			if (ev->x < edge->start ) {
-				edge->started = true;
-				int nx = ev->x;
-		   		if (edge->zone->w - nx > w) {
-			   		nx = edge->zone->w - w;
-		   		}
-				evas_object_move(edge->r, nx, 0);
-			}
-			else if (ev->x > edge->start ) {
-				edge->ignore = true;
-			}
-	   	}
+	printf("mouse move : %d, %d \n", ev->x, edge->last);
+   if (ev->x > edge->last) edge->dir = DIR_RIGHT;
+   else if (ev->x < edge->last) edge->dir = DIR_LEFT;
+   else edge->dir = DIR_NO;
 
+   edge->last = edge->current;
+   edge->current = ev->x;
+
+   if (edge->state == STATE_AWOKEN_FROM_HIDDEN) {
+		if (ev->x > edge->start ) {
+			edge->state = STATE_HIDDEN;
+		}
+		else if (ev->x < edge->start ) {
+			edge->state = STATE_MOVING;
+			int nx = ev->x - edge->offset;
+		   	if (edge->zone->w - nx > w) {
+			   	nx = edge->zone->w - w;
+		   	}
+			evas_object_move(edge->r, nx, 0);
+		}
+   }
+   else if (edge->state == STATE_AWOKEN_FROM_OPENED) {
+		if (ev->x < edge->start ) {
+			edge->state = STATE_OPENED;
+		}
+		else if (ev->x > edge->start ) {
+			edge->state = STATE_MOVING;
+			int nx = ev->x - edge->offset;
+		   	if (edge->zone->w - nx > w) {
+			   	nx = edge->zone->w - w;
+		   	}
+			evas_object_move(edge->r, nx, 0);
+		}
+   }
+   else if (edge->state == STATE_MOVING) {
+	   int nx = ev->x - edge->offset;
+	   if (edge->zone->w - nx > w) {
+		   nx = edge->zone->w - w;
+	   }
+	   evas_object_move(edge->r, nx, 0);
    }
 
    return ECORE_CALLBACK_PASS_ON;
 }
+static void
+_rect_mouse_down(void *data EINA_UNUSED, Evas *e EINA_UNUSED, Evas_Object *o EINA_UNUSED, void *event_info)
+{
+   Evas_Event_Mouse_Down *ev = event_info;
+   if (ev->button != 1) return;
+
+   Edge* edge = data;
+   edge->down = true;
+   edge->start = ev->canvas.x;
+   edge->last = ev->canvas.x;
+   edge->current = ev->canvas.x;
+   edge->state = STATE_AWOKEN_FROM_OPENED;
+   int x, y, w, h;
+   evas_object_geometry_get(edge->r, &x, &y, &w, &h);
+   edge->offset = ev->canvas.x - x;
+}
+
+
 
 Evas_Object* add_stuff()
 {
@@ -132,7 +229,9 @@ Evas_Object* add_stuff()
                    zone->comp->name, zone->name, zone->x, zone->y, zone->w, zone->h);
 			Edge* edge = edge_new();
 		Evas_Object* r = evas_object_rectangle_add(zone->comp->evas);
-        evas_object_layer_set(r, E_LAYER_DESKTOP_TOP + 10);
+		evas_object_event_callback_add(r, EVAS_CALLBACK_MOUSE_DOWN, _rect_mouse_down, edge);
+
+        evas_object_layer_set(r, E_LAYER_MENU + 10);
 		evas_object_color_set(r, 55, 50, 50, 255);
 		evas_object_move(r, zone->w, 0);
 		evas_object_resize(r, 100, zone->h);
