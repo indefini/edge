@@ -132,6 +132,7 @@ Evas_Object* add_stuff()
                    zone->comp->name, zone->name, zone->x, zone->y, zone->w, zone->h);
 			Edge* edge = edge_new();
 		Evas_Object* r = evas_object_rectangle_add(zone->comp->evas);
+        evas_object_layer_set(r, E_LAYER_DESKTOP_TOP + 10);
 		evas_object_color_set(r, 55, 50, 50, 255);
 		evas_object_move(r, zone->w, 0);
 		evas_object_resize(r, 100, zone->h);
